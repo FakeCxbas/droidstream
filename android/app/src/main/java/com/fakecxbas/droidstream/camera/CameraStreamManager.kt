@@ -4,7 +4,14 @@ import android.content.Context
 import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CaptureRequest
+import android.util.Range
 import android.util.Size
+import androidx.annotation.OptIn
+import androidx.camera.camera2.interop.Camera2CameraInfo
+import androidx.camera.camera2.interop.Camera2Interop
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -31,12 +38,52 @@ class CameraStreamManager(
     var targetWidth = 640
     var targetHeight = 480
     var jpegQuality = 80
-    var mirrorFrontCamera = false
+    var manualRotation = 0 // 0, 90, 180, 270
+    var targetFps = 30 // 30 or 60
+
+    fun rotateNext(): Int {
+        manualRotation = (manualRotation + 90) % 360
+        return manualRotation
+    }
 
     fun setResolution(width: Int, height: Int) {
         targetWidth = width
         targetHeight = height
         bindCameraUseCases()
+    }
+
+    fun setFps(fps: Int): Boolean {
+        targetFps = fps
+        bindCameraUseCases()
+        return isFpsRangeSupported(fps)
+    }
+
+    fun isFpsRangeSupported(targetFps: Int): Boolean {
+        val ranges = getAvailableFpsRanges()
+        return ranges.any { it.upper >= targetFps }
+    }
+
+    @OptIn(ExperimentalCamera2Interop::class)
+    fun getAvailableFpsRanges(): List<Range<Int>> {
+        val info = camera?.cameraInfo ?: return emptyList()
+        val camera2Info = Camera2CameraInfo.from(info)
+        val ranges = camera2Info.getCameraCharacteristic(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+        return ranges?.toList() ?: emptyList()
+    }
+
+    private fun findBestFpsRange(target: Int): Range<Int>? {
+        val ranges = getAvailableFpsRanges()
+        if (ranges.isEmpty()) return null
+
+        // Try exact match first
+        for (r in ranges) {
+            if (r.lower == target && r.upper == target) return r
+        }
+        // Try range matching upper limit
+        for (r in ranges) {
+            if (r.upper == target) return r
+        }
+        return null
     }
 
     fun startCamera(onReady: () -> Unit = {}) {
@@ -48,6 +95,7 @@ class CameraStreamManager(
         }, ContextCompat.getMainExecutor(context))
     }
 
+    @OptIn(ExperimentalCamera2Interop::class)
     private fun bindCameraUseCases() {
         val provider = cameraProvider ?: return
         provider.unbindAll()
@@ -57,7 +105,6 @@ class CameraStreamManager(
             .build()
 
         if (!provider.hasCamera(cameraSelector)) {
-            // Fallback if the requested lens is not present on the device
             lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
                 CameraSelector.LENS_FACING_FRONT
             } else {
@@ -69,24 +116,33 @@ class CameraStreamManager(
             .requireLensFacing(lensFacing)
             .build()
 
-        val preview = Preview.Builder()
+        val previewBuilder = Preview.Builder()
             .setTargetResolution(Size(targetWidth, targetHeight))
-            .build()
 
+        val analysisBuilder = ImageAnalysis.Builder()
+            .setTargetResolution(Size(targetWidth, targetHeight))
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
+
+        // Configure target FPS if supported
+        val selectedRange = findBestFpsRange(targetFps)
+        if (selectedRange != null) {
+            Camera2Interop.Extender(previewBuilder)
+                .setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, selectedRange)
+            Camera2Interop.Extender(analysisBuilder)
+                .setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, selectedRange)
+        }
+
+        val preview = previewBuilder.build()
         previewView?.let {
             preview.setSurfaceProvider(it.surfaceProvider)
         }
 
-        imageAnalysis = ImageAnalysis.Builder()
-            .setTargetResolution(Size(targetWidth, targetHeight))
-            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
-            .build()
-            .also { analysis ->
-                analysis.setAnalyzer(cameraExecutor) { imageProxy ->
-                    processImageProxy(imageProxy)
-                }
+        imageAnalysis = analysisBuilder.build().also { analysis ->
+            analysis.setAnalyzer(cameraExecutor) { imageProxy ->
+                processImageProxy(imageProxy)
             }
+        }
 
         camera = if (previewView != null) {
             provider.bindToLifecycle(lifecycleOwner, effectiveSelector, preview, imageAnalysis)
@@ -96,10 +152,11 @@ class CameraStreamManager(
     }
 
     private fun processImageProxy(image: ImageProxy) {
-        val rotationDegrees = image.imageInfo.rotationDegrees
-        val rawNv21 = yuv420ToNv21(image)
+        val sensorRotation = image.imageInfo.rotationDegrees
+        val totalRotation = (sensorRotation + manualRotation) % 360
 
-        val (finalNv21, finalSize) = rotateNV21(rawNv21, image.width, image.height, rotationDegrees)
+        val rawNv21 = yuv420ToNv21(image)
+        val (finalNv21, finalSize) = rotateNV21(rawNv21, image.width, image.height, totalRotation)
 
         val out = ByteArrayOutputStream()
         val yuvImage = YuvImage(finalNv21, ImageFormat.NV21, finalSize.width, finalSize.height, null)

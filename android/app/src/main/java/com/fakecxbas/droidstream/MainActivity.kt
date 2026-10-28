@@ -94,6 +94,24 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        binding.btnRotate.setOnClickListener {
+            val rot = cameraManager?.rotateNext() ?: 0
+            binding.btnRotate.text = "Rotar ${rot}°"
+        }
+
+        binding.btnFps.setOnClickListener {
+            val currentFps = cameraManager?.targetFps ?: 30
+            val nextFps = if (currentFps == 30) 60 else 30
+            val supported = cameraManager?.setFps(nextFps) ?: false
+            if (supported) {
+                binding.btnFps.text = "${nextFps} FPS"
+            } else {
+                Toast.makeText(this, "El sensor activo no soporta ${nextFps} FPS", Toast.LENGTH_SHORT).show()
+                cameraManager?.setFps(30)
+                binding.btnFps.text = "30 FPS"
+            }
+        }
+
         binding.btnResolution.setOnClickListener {
             val isCurrently480p = (cameraManager?.targetWidth == 640)
             if (isCurrently480p) {
