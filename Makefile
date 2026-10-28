@@ -1,4 +1,4 @@
-.PHONY: all build-receiver test-receiver run-usb run-wifi setup-v4l2 clean
+.PHONY: all build-receiver test-receiver run-usb run-wifi setup-v4l2 clean build-apk install-apk
 
 all: build-receiver
 
