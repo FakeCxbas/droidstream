@@ -28,8 +28,8 @@ class CameraStreamManager(
     var lensFacing: Int = CameraSelector.LENS_FACING_BACK
         private set
 
-    var targetWidth = 1280
-    var targetHeight = 720
+    var targetWidth = 640
+    var targetHeight = 480
     var jpegQuality = 80
     var mirrorFrontCamera = false
 

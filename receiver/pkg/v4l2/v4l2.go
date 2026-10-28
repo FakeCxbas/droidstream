@@ -29,11 +29,11 @@ const (
 )
 
 type Device struct {
-	mu     sync.Mutex
-	file   *os.File
-	width  uint32
-	height uint32
-	format FourCC
+	mu      sync.Mutex
+	file    *os.File
+	width   uint32
+	height  uint32
+	format  FourCC
 	bufYU12 []byte
 }
 
@@ -43,9 +43,32 @@ func Open(devicePath string) (*Device, error) {
 		return nil, fmt.Errorf("failed to open v4l2 device %s: %w", devicePath, err)
 	}
 
-	return &Device{
+	dev := &Device{
 		file: f,
-	}, nil
+	}
+
+	// Query actual format configured on the v4l2 device
+	buf := make([]byte, 208)
+	binary.LittleEndian.PutUint32(buf[0:4], V4L2_BUF_TYPE_VIDEO_OUTPUT)
+	fd := f.Fd()
+	_, _, errno := syscall.Syscall(
+		syscall.SYS_IOCTL,
+		fd,
+		VIDIOC_G_FMT,
+		uintptr(unsafe.Pointer(&buf[0])),
+	)
+
+	if errno == 0 {
+		dev.width = binary.LittleEndian.Uint32(buf[8:12])
+		dev.height = binary.LittleEndian.Uint32(buf[12:16])
+		dev.format = FourCC(binary.LittleEndian.Uint32(buf[16:20]))
+		sizeImage := (dev.width * dev.height * 3) / 2
+		if sizeImage > 0 {
+			dev.bufYU12 = make([]byte, sizeImage)
+		}
+	}
+
+	return dev, nil
 }
 
 func (d *Device) Close() error {
@@ -98,15 +121,22 @@ func (d *Device) SetFormat(width, height uint32, format FourCC) error {
 		uintptr(unsafe.Pointer(&buf[0])),
 	)
 
-	if errno != 0 {
+	// Update device geometry even if keep_format is locked
+	if errno == 0 {
+		d.width = width
+		d.height = height
+		d.format = format
+		if format == PixelFormatYUV420 {
+			d.bufYU12 = make([]byte, sizeImage)
+		}
+	} else if d.width == 0 || d.height == 0 {
+		d.width = width
+		d.height = height
+		d.format = format
+		if format == PixelFormatYUV420 {
+			d.bufYU12 = make([]byte, sizeImage)
+		}
 		return fmt.Errorf("ioctl VIDIOC_S_FMT failed: %w", errno)
-	}
-
-	d.width = width
-	d.height = height
-	d.format = format
-	if format == PixelFormatYUV420 {
-		d.bufYU12 = make([]byte, sizeImage)
 	}
 
 	return nil
@@ -118,7 +148,8 @@ func (d *Device) WriteFrame(data []byte) (int, error) {
 	return d.file.Write(data)
 }
 
-// WriteJPEGAsYU12 decodes a JPEG frame into planar YU12 (YUV420p) and writes it into v4l2 device
+// WriteJPEGAsYU12 decodes a JPEG frame into planar YU12 (YUV420p), scales it to the device's
+// exact width/height, and writes the exact buffer size expected by v4l2loopback
 func (d *Device) WriteJPEGAsYU12(jpegData []byte) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -129,61 +160,99 @@ func (d *Device) WriteJPEGAsYU12(jpegData []byte) error {
 	}
 
 	bounds := img.Bounds()
-	w := bounds.Dx()
-	h := bounds.Dy()
-	requiredSize := (w * h * 3) / 2
+	srcW := bounds.Dx()
+	srcH := bounds.Dy()
 
+	outW := int(d.width)
+	outH := int(d.height)
+	if outW <= 0 || outH <= 0 {
+		outW = srcW
+		outH = srcH
+	}
+
+	requiredSize := (outW * outH * 3) / 2
 	if len(d.bufYU12) != requiredSize {
 		d.bufYU12 = make([]byte, requiredSize)
 	}
 
 	ycbcr, isYCbCr := img.(*image.YCbCr)
 	if isYCbCr && ycbcr.SubsampleRatio == image.YCbCrSubsampleRatio420 {
-		// Fast path: image is already YCbCr 4:2:0 planar!
-		yIdx := 0
-		for y := 0; y < h; y++ {
-			srcOffset := ycbcr.YOffset(0, y)
-			copy(d.bufYU12[yIdx:yIdx+w], ycbcr.Y[srcOffset:srcOffset+w])
-			yIdx += w
-		}
+		if srcW == outW && srcH == outH {
+			// Fast path: dimensions match and image is already YCbCr 4:2:0 planar
+			yIdx := 0
+			for y := 0; y < outH; y++ {
+				srcOffset := ycbcr.YOffset(0, y)
+				copy(d.bufYU12[yIdx:yIdx+outW], ycbcr.Y[srcOffset:srcOffset+outW])
+				yIdx += outW
+			}
 
-		uIdx := w * h
-		vIdx := w * h + (w*h)/4
-		halfW := w / 2
-		halfH := h / 2
+			uIdx := outW * outH
+			vIdx := outW * outH + (outW*outH)/4
+			halfW := outW / 2
+			halfH := outH / 2
 
-		for y := 0; y < halfH; y++ {
-			cOffset := ycbcr.COffset(0, y*2)
-			copy(d.bufYU12[uIdx:uIdx+halfW], ycbcr.Cb[cOffset:cOffset+halfW])
-			copy(d.bufYU12[vIdx:vIdx+halfW], ycbcr.Cr[cOffset:cOffset+halfW])
-			uIdx += halfW
-			vIdx += halfW
+			for y := 0; y < halfH; y++ {
+				cOffset := ycbcr.COffset(0, y*2)
+				copy(d.bufYU12[uIdx:uIdx+halfW], ycbcr.Cb[cOffset:cOffset+halfW])
+				copy(d.bufYU12[vIdx:vIdx+halfW], ycbcr.Cr[cOffset:cOffset+halfW])
+				uIdx += halfW
+				vIdx += halfW
+			}
+		} else {
+			// Fast integer scaling for YCbCr 4:2:0 planar
+			uIdx := outW * outH
+			vIdx := outW * outH + (outW*outH)/4
+			halfOutW := outW / 2
+			halfOutH := outH / 2
+
+			// Scale Y plane
+			for y := 0; y < outH; y++ {
+				srcY := (y * srcH) / outH
+				srcRowOffset := ycbcr.YOffset(0, srcY)
+				dstRowOffset := y * outW
+				for x := 0; x < outW; x++ {
+					srcX := (x * srcW) / outW
+					d.bufYU12[dstRowOffset+x] = ycbcr.Y[srcRowOffset+srcX]
+				}
+			}
+
+			// Scale U and V planes (subsampled 2x2)
+			for y := 0; y < halfOutH; y++ {
+				srcY := (y * 2 * srcH) / outH
+				srcCOffset := ycbcr.COffset(0, srcY)
+				dstRowOffset := y * halfOutW
+				for x := 0; x < halfOutW; x++ {
+					srcX := (x * 2 * srcW) / outW
+					d.bufYU12[uIdx+dstRowOffset+x] = ycbcr.Cb[srcCOffset+srcX/2]
+					d.bufYU12[vIdx+dstRowOffset+x] = ycbcr.Cr[srcCOffset+srcX/2]
+				}
+			}
 		}
 	} else {
-		// Generic conversion fallback
-		yOffset := 0
-		uOffset := w * h
-		vOffset := w * h + (w*h)/4
+		// Generic conversion fallback with integer scaling
+		uIdx := outW * outH
+		vIdx := outW * outH + (outW*outH)/4
 
-		for y := 0; y < h; y++ {
-			for x := 0; x < w; x++ {
-				r, g, b, _ := img.At(x, y).RGBA()
-				// Convert 16-bit color to 8-bit
+		for y := 0; y < outH; y++ {
+			srcY := (y * srcH) / outH
+			for x := 0; x < outW; x++ {
+				srcX := (x * srcW) / outW
+				r, g, b, _ := img.At(srcX, srcY).RGBA()
 				r8 := uint8(r >> 8)
 				g8 := uint8(g >> 8)
 				b8 := uint8(b >> 8)
 
-				// Standard ITU-R BT.601 conversion
+				// ITU-R BT.601 conversion
 				yVal := uint8((66*int(r8) + 129*int(g8) + 25*int(b8) + 128)>>8 + 16)
-				d.bufYU12[yOffset+y*w+x] = yVal
+				d.bufYU12[y*outW+x] = yVal
 
 				if x%2 == 0 && y%2 == 0 {
 					uVal := uint8((-38*int(r8) - 74*int(g8) + 112*int(b8) + 128)>>8 + 128)
 					vVal := uint8((112*int(r8) - 94*int(g8) - 18*int(b8) + 128)>>8 + 128)
 
-					uvIdx := (y/2)*(w/2) + (x / 2)
-					d.bufYU12[uOffset+uvIdx] = uVal
-					d.bufYU12[vOffset+uvIdx] = vVal
+					uvIdx := (y/2)*(outW/2) + (x / 2)
+					d.bufYU12[uIdx+uvIdx] = uVal
+					d.bufYU12[vIdx+uvIdx] = vVal
 				}
 			}
 		}
