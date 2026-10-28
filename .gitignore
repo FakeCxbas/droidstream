@@ -1,0 +1,21 @@
+# Binaries & Go
+/receiver/bin/
+*.exe
+*.test
+*.out
+
+# Android & Gradle
+.gradle/
+build/
+*/build/
+*.apk
+*.aab
+local.properties
+.idea/
+*.iml
+.cxx/
+captures/
+
+# OS specific
+.DS_Store
+Thumbs.db
