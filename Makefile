@@ -1,4 +1,4 @@
-.PHONY: all build-receiver test-receiver run-usb run-wifi run-gui setup-v4l2 clean build-apk install-apk
+.PHONY: all build-receiver test-receiver run-usb run-wifi run-gui setup-v4l2 setup-firewall clean build-apk install-apk
 
 all: build-receiver
 
@@ -27,6 +27,12 @@ setup-v4l2:
 	@sleep 0.5
 	@v4l2-ctl --device=/dev/video2 -c keep_format=0 2>/dev/null || true
 	@v4l2-ctl --device=/dev/video2 --set-fmt-video-out=width=1280,height=720,pixelformat=YU12 2>/dev/null || true
+
+setup-firewall:
+	@echo "Habilitando puertos de DroidStream en el firewall UFW..."
+	sudo ufw allow 4747/tcp comment "DroidStream Video"
+	sudo ufw allow 4749/udp comment "DroidStream Discovery"
+	sudo ufw reload
 
 clean:
 	rm -rf receiver/bin
