@@ -383,7 +383,8 @@ func (s *Server) startWebServer(ctx context.Context) {
                     <div style="font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-bottom: 12px;">
                         • Puerto de transmision: <strong style="color: var(--text-main);">%s</strong><br>
                         • Auto-descubrimiento activo en UDP: <strong>4749</strong>.<br>
-                        • En la app Android, pulsa <strong>Detectar PC</strong> o introduce esta IP en el campo Host.
+                        • En la app Android, pulsa <strong>Detectar PC</strong> o introduce esta IP en el campo Host.<br>
+                        • Si hay cortafuegos activo en Linux (UFW), autoriza los puertos con: <code style="color: var(--accent-green); background: #000; padding: 2px 6px; border-radius: 4px;">make setup-firewall</code>
                     </div>
                 </div>
 
