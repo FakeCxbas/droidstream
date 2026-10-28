@@ -22,11 +22,19 @@ const (
 
 	VIDIOC_S_FMT uintptr = 0xc0d05605
 	VIDIOC_G_FMT uintptr = 0xc0d05604
+	VIDIOC_S_CTRL uintptr = 0xc008561c
+
+	V4L2_CID_KEEP_FORMAT uint32 = 0x0098f900
 
 	PixelFormatYUV420 FourCC = 0x32315559 // 'YU12' (I420 / Planar YUV 4:2:0)
 	PixelFormatYUYV   FourCC = 0x56595559 // 'YUYV' (YUV 4:2:2)
 	PixelFormatMJPEG  FourCC = 0x47504a4d // 'MJPG'
 )
+
+type v4l2Control struct {
+	id    uint32
+	value int32
+}
 
 type Device struct {
 	mu      sync.Mutex
@@ -114,6 +122,19 @@ func (d *Device) SetFormat(width, height uint32, format FourCC) error {
 	binary.LittleEndian.PutUint32(buf[28:32], sizeImage)
 
 	fd := d.file.Fd()
+
+	// Ensure keep_format is disabled so v4l2loopback accepts the format update
+	ctrl := v4l2Control{
+		id:    V4L2_CID_KEEP_FORMAT,
+		value: 0,
+	}
+	_, _, _ = syscall.Syscall(
+		syscall.SYS_IOCTL,
+		fd,
+		VIDIOC_S_CTRL,
+		uintptr(unsafe.Pointer(&ctrl)),
+	)
+
 	_, _, errno := syscall.Syscall(
 		syscall.SYS_IOCTL,
 		fd,
@@ -199,44 +220,127 @@ func (d *Device) WriteJPEGAsYU12(jpegData []byte) error {
 				vIdx += halfW
 			}
 		} else {
-			// Fast integer scaling for YCbCr 4:2:0 planar
+			// Proportional integer scaling with aspect ratio preservation (letterbox / pillarbox)
+			var drawW, drawH int
+			if srcW*outH > srcH*outW {
+				drawW = outW
+				drawH = (srcH * outW) / srcW
+			} else {
+				drawH = outH
+				drawW = (srcW * outH) / srcH
+			}
+
+			drawW &= ^1
+			drawH &= ^1
+			if drawW < 2 {
+				drawW = 2
+			}
+			if drawH < 2 {
+				drawH = 2
+			}
+			if drawW > outW {
+				drawW = outW
+			}
+			if drawH > outH {
+				drawH = outH
+			}
+
+			offsetX := ((outW - drawW) / 2) & ^1
+			offsetY := ((outH - drawH) / 2) & ^1
+
+			// Initialize black background if bars are present (BT.601 limited range: Y=16, U=128, V=128)
+			if offsetX > 0 || offsetY > 0 {
+				yTotal := outW * outH
+				for i := 0; i < yTotal; i++ {
+					d.bufYU12[i] = 16
+				}
+				uvTotal := yTotal / 2
+				for i := 0; i < uvTotal; i++ {
+					d.bufYU12[yTotal+i] = 128
+				}
+			}
+
 			uIdx := outW * outH
 			vIdx := outW * outH + (outW*outH)/4
+			halfDrawW := drawW / 2
+			halfDrawH := drawH / 2
 			halfOutW := outW / 2
-			halfOutH := outH / 2
+			halfOffsetX := offsetX / 2
+			halfOffsetY := offsetY / 2
 
 			// Scale Y plane
-			for y := 0; y < outH; y++ {
-				srcY := (y * srcH) / outH
+			for dy := 0; dy < drawH; dy++ {
+				srcY := (dy * srcH) / drawH
 				srcRowOffset := ycbcr.YOffset(0, srcY)
-				dstRowOffset := y * outW
-				for x := 0; x < outW; x++ {
-					srcX := (x * srcW) / outW
-					d.bufYU12[dstRowOffset+x] = ycbcr.Y[srcRowOffset+srcX]
+				dstRowOffset := (offsetY + dy) * outW + offsetX
+				for dx := 0; dx < drawW; dx++ {
+					srcX := (dx * srcW) / drawW
+					d.bufYU12[dstRowOffset+dx] = ycbcr.Y[srcRowOffset+srcX]
 				}
 			}
 
 			// Scale U and V planes (subsampled 2x2)
-			for y := 0; y < halfOutH; y++ {
-				srcY := (y * 2 * srcH) / outH
+			for dy := 0; dy < halfDrawH; dy++ {
+				srcY := (dy * 2 * srcH) / drawH
 				srcCOffset := ycbcr.COffset(0, srcY)
-				dstRowOffset := y * halfOutW
-				for x := 0; x < halfOutW; x++ {
-					srcX := (x * 2 * srcW) / outW
-					d.bufYU12[uIdx+dstRowOffset+x] = ycbcr.Cb[srcCOffset+srcX/2]
-					d.bufYU12[vIdx+dstRowOffset+x] = ycbcr.Cr[srcCOffset+srcX/2]
+				dstRowOffset := (halfOffsetY + dy) * halfOutW + halfOffsetX
+				for dx := 0; dx < halfDrawW; dx++ {
+					srcX := (dx * 2 * srcW) / drawW
+					d.bufYU12[uIdx+dstRowOffset+dx] = ycbcr.Cb[srcCOffset+srcX/2]
+					d.bufYU12[vIdx+dstRowOffset+dx] = ycbcr.Cr[srcCOffset+srcX/2]
 				}
 			}
 		}
 	} else {
-		// Generic conversion fallback with integer scaling
+		// Generic conversion fallback with proportional scaling
+		var drawW, drawH int
+		if srcW*outH > srcH*outW {
+			drawW = outW
+			drawH = (srcH * outW) / srcW
+		} else {
+			drawH = outH
+			drawW = (srcW * outH) / srcH
+		}
+		drawW &= ^1
+		drawH &= ^1
+		if drawW < 2 {
+			drawW = 2
+		}
+		if drawH < 2 {
+			drawH = 2
+		}
+		if drawW > outW {
+			drawW = outW
+		}
+		if drawH > outH {
+			drawH = outH
+		}
+
+		offsetX := ((outW - drawW) / 2) & ^1
+		offsetY := ((outH - drawH) / 2) & ^1
+
+		if offsetX > 0 || offsetY > 0 {
+			yTotal := outW * outH
+			for i := 0; i < yTotal; i++ {
+				d.bufYU12[i] = 16
+			}
+			uvTotal := yTotal / 2
+			for i := 0; i < uvTotal; i++ {
+				d.bufYU12[yTotal+i] = 128
+			}
+		}
+
 		uIdx := outW * outH
 		vIdx := outW * outH + (outW*outH)/4
+		halfOutW := outW / 2
+		halfOffsetX := offsetX / 2
+		halfOffsetY := offsetY / 2
 
-		for y := 0; y < outH; y++ {
-			srcY := (y * srcH) / outH
-			for x := 0; x < outW; x++ {
-				srcX := (x * srcW) / outW
+		for dy := 0; dy < drawH; dy++ {
+			srcY := (dy * srcH) / drawH
+			dstRowOffset := (offsetY + dy) * outW + offsetX
+			for dx := 0; dx < drawW; dx++ {
+				srcX := (dx * srcW) / drawW
 				r, g, b, _ := img.At(srcX, srcY).RGBA()
 				r8 := uint8(r >> 8)
 				g8 := uint8(g >> 8)
@@ -244,15 +348,15 @@ func (d *Device) WriteJPEGAsYU12(jpegData []byte) error {
 
 				// ITU-R BT.601 conversion
 				yVal := uint8((66*int(r8) + 129*int(g8) + 25*int(b8) + 128)>>8 + 16)
-				d.bufYU12[y*outW+x] = yVal
+				d.bufYU12[dstRowOffset+dx] = yVal
 
-				if x%2 == 0 && y%2 == 0 {
+				if dx%2 == 0 && dy%2 == 0 {
 					uVal := uint8((-38*int(r8) - 74*int(g8) + 112*int(b8) + 128)>>8 + 128)
 					vVal := uint8((112*int(r8) - 94*int(g8) - 18*int(b8) + 128)>>8 + 128)
 
-					uvIdx := (y/2)*(outW/2) + (x / 2)
-					d.bufYU12[uIdx+uvIdx] = uVal
-					d.bufYU12[vIdx+uvIdx] = vVal
+					uvRowOffset := (halfOffsetY + dy/2) * halfOutW + (halfOffsetX + dx/2)
+					d.bufYU12[uIdx+uvRowOffset] = uVal
+					d.bufYU12[vIdx+uvRowOffset] = vVal
 				}
 			}
 		}

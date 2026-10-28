@@ -18,8 +18,8 @@ import (
 func main() {
 	devicePath := flag.String("dev", "/dev/video2", "Path to v4l2loopback video device")
 	port := flag.Int("port", 4747, "TCP port to listen on")
-	width := flag.Int("width", 640, "Frame width in pixels")
-	height := flag.Int("height", 480, "Frame height in pixels")
+	width := flag.Int("width", 1280, "Frame width in pixels")
+	height := flag.Int("height", 720, "Frame height in pixels")
 	formatStr := flag.String("format", "yu12", "Video format: yu12, yuyv, mjpeg")
 	enableADB := flag.Bool("adb", false, "Automatically configure adb forward tunnel for USB mode")
 	webPort := flag.Int("web", 4748, "HTTP port for web monitor preview (0 to disable)")

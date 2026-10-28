@@ -22,6 +22,9 @@ run-wifi: build-receiver
 setup-v4l2:
 	@echo "Cargando modulo v4l2loopback para DroidStream..."
 	sudo modprobe v4l2loopback devices=1 video_nr=2 card_label="DroidStream" exclusive_caps=1
+	@sleep 0.5
+	@v4l2-ctl --device=/dev/video2 -c keep_format=0 2>/dev/null || true
+	@v4l2-ctl --device=/dev/video2 --set-fmt-video-out=width=1280,height=720,pixelformat=YU12 2>/dev/null || true
 
 clean:
 	rm -rf receiver/bin
