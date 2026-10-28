@@ -110,19 +110,20 @@ make run-wifi
 ```
 En el cliente Android, introduce la IP local de tu computadora y el puerto `4747`.
 
-### 3. Compilación de la Aplicación Android
+### 3. Compilacion e Instalacion de la Aplicacion Android
 
-Abrir el directorio `android/` en Android Studio o compilar mediante Gradle:
+Para compilar el APK de depuracion directamente:
 
 ```bash
-cd android
-./gradlew assembleDebug
+make build-apk
 ```
 
-Instalar el APK generado en el dispositivo:
+El archivo generado estara ubicado en `android/app/build/outputs/apk/debug/app-debug.apk`.
+
+Para instalarlo directamente en el dispositivo conectado por cable USB con depuracion habilitada:
 
 ```bash
-adb install app/build/outputs/apk/debug/app-debug.apk
+make install-apk
 ```
 
 ---
