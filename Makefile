@@ -11,7 +11,8 @@ test-receiver:
 	cd receiver && go test -v ./...
 
 run-usb: build-receiver
-	@echo "Iniciando DroidStream en modo USB (ADB)..."
+	@echo "Configurando tunel ADB reverse e iniciando DroidStream en modo USB..."
+	@adb forward --remove-all 2>/dev/null || true
 	./receiver/bin/droidstream -adb -dev /dev/video2
 
 run-wifi: build-receiver

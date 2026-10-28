@@ -100,7 +100,7 @@ Conecta el teléfono mediante cable USB con depuración habilitada y ejecuta:
 ```bash
 make run-usb
 ```
-Esto configurará automáticamente el túnel `adb forward tcp:4747 tcp:4747` y levantará el receptor en `/dev/video2`.
+Esto configurara automaticamente el tunel `adb reverse tcp:4747 tcp:4747` y levantara el receptor en `/dev/video2`.
 
 #### Modo Wi-Fi
 Para operar a través de la red local sin cables:

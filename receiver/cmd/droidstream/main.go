@@ -38,12 +38,14 @@ func main() {
 	}
 
 	if *enableADB {
-		log.Println("[adb] configuring port forwarding: adb forward tcp:4747 tcp:4747 ...")
-		cmd := exec.Command("adb", "forward", fmt.Sprintf("tcp:%d", *port), fmt.Sprintf("tcp:%d", *port))
+		log.Printf("[adb] configuring reverse port tunnel: adb reverse tcp:%d tcp:%d ...\n", *port, *port)
+		// Clean up previous forward if present
+		_ = exec.Command("adb", "forward", "--remove", fmt.Sprintf("tcp:%d", *port)).Run()
+		cmd := exec.Command("adb", "reverse", fmt.Sprintf("tcp:%d", *port), fmt.Sprintf("tcp:%d", *port))
 		if out, err := cmd.CombinedOutput(); err != nil {
-			log.Printf("[adb] warning: failed to set adb forward: %v (%s)", err, strings.TrimSpace(string(out)))
+			log.Printf("[adb] warning: failed to set adb reverse: %v (%s)", err, strings.TrimSpace(string(out)))
 		} else {
-			log.Println("[adb] forward tunnel active")
+			log.Println("[adb] reverse tunnel active (phone 127.0.0.1 -> PC)")
 		}
 	}
 
