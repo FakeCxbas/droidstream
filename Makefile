@@ -24,3 +24,12 @@ setup-v4l2:
 
 clean:
 	rm -rf receiver/bin
+	cd android && ./gradlew clean
+
+build-apk:
+	@echo "Compilando APK de Android (Debug)..."
+	cd android && ./gradlew assembleDebug
+
+install-apk:
+	@echo "Instalando APK en el dispositivo conectado por ADB..."
+	adb install -r android/app/build/outputs/apk/debug/app-debug.apk

@@ -31,6 +31,7 @@ class CameraStreamManager(
     var targetWidth = 1280
     var targetHeight = 720
     var jpegQuality = 80
+    var mirrorFrontCamera = false
 
     fun startCamera(onReady: () -> Unit = {}) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
@@ -46,6 +47,19 @@ class CameraStreamManager(
         provider.unbindAll()
 
         val cameraSelector = CameraSelector.Builder()
+            .requireLensFacing(lensFacing)
+            .build()
+
+        if (!provider.hasCamera(cameraSelector)) {
+            // Fallback if the requested lens is not present on the device
+            lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
+                CameraSelector.LENS_FACING_FRONT
+            } else {
+                CameraSelector.LENS_FACING_BACK
+            }
+        }
+
+        val effectiveSelector = CameraSelector.Builder()
             .requireLensFacing(lensFacing)
             .build()
 
@@ -69,21 +83,86 @@ class CameraStreamManager(
             }
 
         camera = if (previewView != null) {
-            provider.bindToLifecycle(lifecycleOwner, cameraSelector, preview, imageAnalysis)
+            provider.bindToLifecycle(lifecycleOwner, effectiveSelector, preview, imageAnalysis)
         } else {
-            provider.bindToLifecycle(lifecycleOwner, cameraSelector, imageAnalysis)
+            provider.bindToLifecycle(lifecycleOwner, effectiveSelector, imageAnalysis)
         }
     }
 
     private fun processImageProxy(image: ImageProxy) {
-        val nv21 = yuv420ToNv21(image)
+        val rotationDegrees = image.imageInfo.rotationDegrees
+        val rawNv21 = yuv420ToNv21(image)
+
+        val (finalNv21, finalSize) = rotateNV21(rawNv21, image.width, image.height, rotationDegrees)
+
         val out = ByteArrayOutputStream()
-        val yuvImage = YuvImage(nv21, ImageFormat.NV21, image.width, image.height, null)
-        yuvImage.compressToJpeg(Rect(0, 0, image.width, image.height), jpegQuality, out)
+        val yuvImage = YuvImage(finalNv21, ImageFormat.NV21, finalSize.width, finalSize.height, null)
+        yuvImage.compressToJpeg(Rect(0, 0, finalSize.width, finalSize.height), jpegQuality, out)
         val jpegBytes = out.toByteArray()
 
-        onFrameReady(jpegBytes, image.width, image.height)
+        onFrameReady(jpegBytes, finalSize.width, finalSize.height)
         image.close()
+    }
+
+    private fun rotateNV21(input: ByteArray, width: Int, height: Int, rotation: Int): Pair<ByteArray, Size> {
+        if (rotation == 0) return Pair(input, Size(width, height))
+        val ySize = width * height
+        val output = ByteArray(input.size)
+
+        when (rotation) {
+            90 -> {
+                var i = 0
+                for (x in 0 until width) {
+                    for (y in height - 1 downTo 0) {
+                        output[i++] = input[y * width + x]
+                    }
+                }
+                var uv = ySize
+                for (x in 0 until width step 2) {
+                    for (y in height / 2 - 1 downTo 0) {
+                        val p = ySize + y * width + x
+                        output[uv++] = input[p]     // V
+                        output[uv++] = input[p + 1] // U
+                    }
+                }
+                return Pair(output, Size(height, width))
+            }
+            270 -> {
+                var i = 0
+                for (x in width - 1 downTo 0) {
+                    for (y in 0 until height) {
+                        output[i++] = input[y * width + x]
+                    }
+                }
+                var uv = ySize
+                for (x in width - 2 downTo 0 step 2) {
+                    for (y in 0 until height / 2) {
+                        val p = ySize + y * width + x
+                        output[uv++] = input[p]     // V
+                        output[uv++] = input[p + 1] // U
+                    }
+                }
+                return Pair(output, Size(height, width))
+            }
+            180 -> {
+                var i = 0
+                for (y in height - 1 downTo 0) {
+                    for (x in width - 1 downTo 0) {
+                        output[i++] = input[y * width + x]
+                    }
+                }
+                var uv = ySize
+                for (y in height / 2 - 1 downTo 0) {
+                    for (x in width - 2 downTo 0 step 2) {
+                        val p = ySize + y * width + x
+                        output[uv++] = input[p]
+                        output[uv++] = input[p + 1]
+                    }
+                }
+                return Pair(output, Size(width, height))
+            }
+            else -> return Pair(input, Size(width, height))
+        }
     }
 
     private fun yuv420ToNv21(image: ImageProxy): ByteArray {
@@ -136,17 +215,36 @@ class CameraStreamManager(
         return nv21
     }
 
-    fun switchCamera() {
-        lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
+    fun switchCamera(): Int {
+        val provider = cameraProvider ?: return lensFacing
+        val nextFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
             CameraSelector.LENS_FACING_FRONT
         } else {
             CameraSelector.LENS_FACING_BACK
         }
-        bindCameraUseCases()
+
+        val selector = CameraSelector.Builder()
+            .requireLensFacing(nextFacing)
+            .build()
+
+        if (provider.hasCamera(selector)) {
+            lensFacing = nextFacing
+            bindCameraUseCases()
+        }
+
+        return lensFacing
     }
 
-    fun setTorch(enable: Boolean) {
+    fun hasFlashUnit(): Boolean {
+        return camera?.cameraInfo?.hasFlashUnit() == true
+    }
+
+    fun setTorch(enable: Boolean): Boolean {
+        if (!hasFlashUnit()) {
+            return false
+        }
         camera?.cameraControl?.enableTorch(enable)
+        return true
     }
 
     fun stop() {

@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.camera.core.CameraSelector
 import androidx.core.content.ContextCompat
 import com.fakecxbas.droidstream.camera.CameraStreamManager
 import com.fakecxbas.droidstream.databinding.ActivityMainBinding
@@ -60,7 +61,9 @@ class MainActivity : AppCompatActivity() {
                 )
             }
         }
-        cameraManager?.startCamera()
+        cameraManager?.startCamera {
+            updateCameraFacingLabel()
+        }
     }
 
     private fun setupListeners() {
@@ -74,12 +77,28 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnSwitchCamera.setOnClickListener {
             cameraManager?.switchCamera()
+            // Reset torch state upon camera switch since front cameras usually lack flash
+            isTorchOn = false
+            binding.btnTorch.text = "Flash"
+            updateCameraFacingLabel()
         }
 
         binding.btnTorch.setOnClickListener {
-            isTorchOn = !isTorchOn
-            cameraManager?.setTorch(isTorchOn)
+            val targetState = !isTorchOn
+            val success = cameraManager?.setTorch(targetState) ?: false
+            if (success) {
+                isTorchOn = targetState
+                binding.btnTorch.text = if (isTorchOn) "Flash ON" else "Flash"
+            } else {
+                Toast.makeText(this, "El lente actual no dispone de flash físico", Toast.LENGTH_SHORT).show()
+            }
         }
+    }
+
+    private fun updateCameraFacingLabel() {
+        val facing = cameraManager?.lensFacing
+        val name = if (facing == CameraSelector.LENS_FACING_FRONT) "Frontal" else "Trasera"
+        binding.btnSwitchCamera.text = name
     }
 
     private fun connect() {
