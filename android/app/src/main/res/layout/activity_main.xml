@@ -127,6 +127,30 @@
                 android:orientation="horizontal">
 
                 <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnRotate"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Rotar 0°" />
+
+                <Space
+                    android:layout_width="6dp"
+                    android:layout_height="wrap_content" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnFps"
+                    style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="30 FPS" />
+
+                <Space
+                    android:layout_width="6dp"
+                    android:layout_height="wrap_content" />
+
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnResolution"
                     style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                     android:layout_width="0dp"
@@ -135,7 +159,7 @@
                     android:text="480p" />
 
                 <Space
-                    android:layout_width="8dp"
+                    android:layout_width="6dp"
                     android:layout_height="wrap_content" />
 
                 <com.google.android.material.button.MaterialButton
@@ -144,7 +168,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="Ahorro Batería" />
+                    android:text="Ahorro" />
             </LinearLayout>
 
         </LinearLayout>
