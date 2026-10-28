@@ -52,15 +52,14 @@ class CameraStreamManager(
         bindCameraUseCases()
     }
 
-    fun setFps(fps: Int): Boolean {
+    fun setFps(fps: Int) {
         targetFps = fps
+        if (fps >= 60 && targetWidth == 640 && targetHeight == 480) {
+            // Galaxy S21 front camera supports 60 FPS in 16:9 mode (720p/1080p)
+            targetWidth = 1280
+            targetHeight = 720
+        }
         bindCameraUseCases()
-        return isFpsRangeSupported(fps)
-    }
-
-    fun isFpsRangeSupported(targetFps: Int): Boolean {
-        val ranges = getAvailableFpsRanges()
-        return ranges.any { it.upper >= targetFps }
     }
 
     @OptIn(ExperimentalCamera2Interop::class)
@@ -71,19 +70,18 @@ class CameraStreamManager(
         return ranges?.toList() ?: emptyList()
     }
 
-    private fun findBestFpsRange(target: Int): Range<Int>? {
+    private fun findBestFpsRange(target: Int): Range<Int> {
         val ranges = getAvailableFpsRanges()
-        if (ranges.isEmpty()) return null
-
-        // Try exact match first
         for (r in ranges) {
             if (r.lower == target && r.upper == target) return r
         }
-        // Try range matching upper limit
         for (r in ranges) {
             if (r.upper == target) return r
         }
-        return null
+        for (r in ranges) {
+            if (r.upper >= target) return r
+        }
+        return if (target >= 60) Range(30, 60) else Range(15, 30)
     }
 
     fun startCamera(onReady: () -> Unit = {}) {
