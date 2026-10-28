@@ -1,0 +1,26 @@
+.PHONY: all build-receiver test-receiver run-usb run-wifi setup-v4l2 clean
+
+all: build-receiver
+
+build-receiver:
+	@echo "Compilando receptor CLI DroidStream..."
+	cd receiver && go build -o bin/droidstream ./cmd/droidstream
+
+test-receiver:
+	@echo "Ejecutando pruebas unitarias del receptor..."
+	cd receiver && go test -v ./...
+
+run-usb: build-receiver
+	@echo "Iniciando DroidStream en modo USB (ADB)..."
+	./receiver/bin/droidstream -adb -dev /dev/video2
+
+run-wifi: build-receiver
+	@echo "Iniciando DroidStream en modo Wi-Fi..."
+	./receiver/bin/droidstream -dev /dev/video2
+
+setup-v4l2:
+	@echo "Cargando modulo v4l2loopback para DroidStream..."
+	sudo modprobe v4l2loopback devices=1 video_nr=2 card_label="DroidStream" exclusive_caps=1
+
+clean:
+	rm -rf receiver/bin
