@@ -110,17 +110,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnResolution.setOnClickListener {
-            val isCurrently480p = (cameraManager?.targetWidth == 640)
-            if (isCurrently480p) {
-                cameraManager?.setResolution(1280, 720)
-                binding.btnResolution.text = "720p"
-            } else {
+            val isCurrently720p = (cameraManager?.targetWidth == 1280)
+            if (isCurrently720p) {
                 cameraManager?.setResolution(640, 480)
                 binding.btnResolution.text = "480p"
                 if (cameraManager?.targetFps == 60) {
                     cameraManager?.setFps(30)
                     binding.btnFps.text = "30 FPS"
                 }
+            } else {
+                cameraManager?.setResolution(1280, 720)
+                binding.btnResolution.text = "720p"
             }
         }
 

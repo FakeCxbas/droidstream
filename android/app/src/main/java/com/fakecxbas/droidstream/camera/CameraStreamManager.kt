@@ -35,8 +35,8 @@ class CameraStreamManager(
     var lensFacing: Int = CameraSelector.LENS_FACING_BACK
         private set
 
-    var targetWidth = 640
-    var targetHeight = 480
+    var targetWidth = 1280
+    var targetHeight = 720
     var jpegQuality = 80
     var manualRotation = 0 // 0, 90, 180, 270
     var targetFps = 30 // 30 or 60
