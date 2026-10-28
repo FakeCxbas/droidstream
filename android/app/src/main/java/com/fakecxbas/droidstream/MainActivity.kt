@@ -102,13 +102,10 @@ class MainActivity : AppCompatActivity() {
         binding.btnFps.setOnClickListener {
             val currentFps = cameraManager?.targetFps ?: 30
             val nextFps = if (currentFps == 30) 60 else 30
-            val supported = cameraManager?.setFps(nextFps) ?: false
-            if (supported) {
-                binding.btnFps.text = "${nextFps} FPS"
-            } else {
-                Toast.makeText(this, "El sensor activo no soporta ${nextFps} FPS", Toast.LENGTH_SHORT).show()
-                cameraManager?.setFps(30)
-                binding.btnFps.text = "30 FPS"
+            cameraManager?.setFps(nextFps)
+            binding.btnFps.text = "${nextFps} FPS"
+            if (nextFps == 60) {
+                binding.btnResolution.text = "720p"
             }
         }
 
@@ -120,6 +117,10 @@ class MainActivity : AppCompatActivity() {
             } else {
                 cameraManager?.setResolution(640, 480)
                 binding.btnResolution.text = "480p"
+                if (cameraManager?.targetFps == 60) {
+                    cameraManager?.setFps(30)
+                    binding.btnFps.text = "30 FPS"
+                }
             }
         }
 
