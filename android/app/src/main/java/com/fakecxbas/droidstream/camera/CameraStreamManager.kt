@@ -33,6 +33,12 @@ class CameraStreamManager(
     var jpegQuality = 80
     var mirrorFrontCamera = false
 
+    fun setResolution(width: Int, height: Int) {
+        targetWidth = width
+        targetHeight = height
+        bindCameraUseCases()
+    }
+
     fun startCamera(onReady: () -> Unit = {}) {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
         cameraProviderFuture.addListener({
