@@ -23,6 +23,7 @@ func main() {
 	formatStr := flag.String("format", "yu12", "Video format: yu12, yuyv, mjpeg")
 	enableADB := flag.Bool("adb", false, "Automatically configure adb forward tunnel for USB mode")
 	webPort := flag.Int("web", 4748, "HTTP port for web monitor preview (0 to disable)")
+	openGUI := flag.Bool("gui", false, "Open interactive desktop window automatically")
 
 	flag.Parse()
 
@@ -76,7 +77,28 @@ func main() {
 		cancel()
 	}()
 
+	if *openGUI && *webPort > 0 {
+		go launchDesktopWindow(*webPort)
+	}
+
 	if err := srv.Start(ctx); err != nil {
 		log.Fatalf("server terminated with error: %v", err)
 	}
+}
+
+func launchDesktopWindow(port int) {
+	// Wait a moment for HTTP server to bind
+	exec.Command("sleep", "0.5").Run()
+	targetURL := fmt.Sprintf("http://localhost:%d", port)
+
+	// Try Chromium app mode first for a standalone borderless desktop window
+	if _, err := exec.LookPath("chromium"); err == nil {
+		appCmd := exec.Command("chromium", fmt.Sprintf("--app=%s", targetURL), "--user-data-dir=/tmp/droidstream-gui-profile")
+		if err := appCmd.Start(); err == nil {
+			return
+		}
+	}
+
+	// Fallback to default browser
+	_ = exec.Command("xdg-open", targetURL).Start()
 }
