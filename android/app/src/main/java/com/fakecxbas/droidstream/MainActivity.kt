@@ -93,6 +93,25 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, "El lente actual no dispone de flash físico", Toast.LENGTH_SHORT).show()
             }
         }
+
+        binding.btnResolution.setOnClickListener {
+            val isCurrently480p = (cameraManager?.targetWidth == 640)
+            if (isCurrently480p) {
+                cameraManager?.setResolution(1280, 720)
+                binding.btnResolution.text = "720p"
+            } else {
+                cameraManager?.setResolution(640, 480)
+                binding.btnResolution.text = "480p"
+            }
+        }
+
+        binding.btnDimmer.setOnClickListener {
+            binding.dimmerOverlay.visibility = android.view.View.VISIBLE
+        }
+
+        binding.dimmerOverlay.setOnClickListener {
+            binding.dimmerOverlay.visibility = android.view.View.GONE
+        }
     }
 
     private fun updateCameraFacingLabel() {

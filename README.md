@@ -110,6 +110,9 @@ make run-wifi
 ```
 En el cliente Android, introduce la IP local de tu computadora y el puerto `4747`.
 
+#### Monitor Web en Vivo (Navegador)
+El receptor levanta automaticamente un monitor web en `http://localhost:4748` para verificar el stream MJPEG en tiempo real, tasa de FPS y ancho de banda consumido desde cualquier navegador.
+
 ### 3. Compilacion e Instalacion de la Aplicacion Android
 
 Para compilar el APK de depuracion directamente:

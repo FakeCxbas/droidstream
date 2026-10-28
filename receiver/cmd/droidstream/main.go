@@ -22,6 +22,7 @@ func main() {
 	height := flag.Int("height", 480, "Frame height in pixels")
 	formatStr := flag.String("format", "yu12", "Video format: yu12, yuyv, mjpeg")
 	enableADB := flag.Bool("adb", false, "Automatically configure adb forward tunnel for USB mode")
+	webPort := flag.Int("web", 4748, "HTTP port for web monitor preview (0 to disable)")
 
 	flag.Parse()
 
@@ -55,6 +56,7 @@ func main() {
 		Width:      uint32(*width),
 		Height:     uint32(*height),
 		Format:     fmtCode,
+		WebPort:    *webPort,
 	}
 
 	srv, err := server.New(cfg)
