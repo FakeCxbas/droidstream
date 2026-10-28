@@ -2,6 +2,8 @@ package com.fakecxbas.droidstream
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.content.Context
+import android.net.wifi.WifiManager
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -13,6 +15,10 @@ import com.fakecxbas.droidstream.databinding.ActivityMainBinding
 import com.fakecxbas.droidstream.network.StreamSender
 import com.fakecxbas.droidstream.protocol.PacketProtocol
 import com.fakecxbas.droidstream.service.StreamService
+import org.json.JSONObject
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
 
 class MainActivity : AppCompatActivity() {
 
@@ -67,6 +73,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupListeners() {
+        binding.btnDetectWifi.setOnClickListener {
+            discoverPcOverWifi()
+        }
+
+        binding.btnModeUsb.setOnClickListener {
+            binding.etHost.setText("127.0.0.1")
+            binding.etPort.setText("4747")
+            Toast.makeText(this, "Modo USB seleccionado (127.0.0.1)", Toast.LENGTH_SHORT).show()
+        }
+
         binding.btnConnect.setOnClickListener {
             if (isConnected) {
                 disconnect()
@@ -170,6 +186,72 @@ class MainActivity : AppCompatActivity() {
         binding.btnConnect.text = "Conectar"
         binding.tvStatus.text = "Estado: Desconectado"
         StreamService.stopService(this)
+    }
+
+    private fun discoverPcOverWifi() {
+        binding.btnDetectWifi.isEnabled = false
+        binding.btnDetectWifi.text = "Buscando..."
+
+        Thread {
+            var found = false
+            var socket: DatagramSocket? = null
+            var lock: WifiManager.MulticastLock? = null
+            try {
+                val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                lock = wifi?.createMulticastLock("droidstream_discovery")
+                lock?.setReferenceCounted(true)
+                lock?.acquire()
+
+                socket = DatagramSocket()
+                socket.broadcast = true
+                socket.soTimeout = 2500
+
+                val query = "{\"query\":\"droidstream\"}".toByteArray()
+                val broadcastAddr = InetAddress.getByName("255.255.255.255")
+                val packet = DatagramPacket(query, query.size, broadcastAddr, 4749)
+                socket.send(packet)
+
+                val buf = ByteArray(1024)
+                val responsePacket = DatagramPacket(buf, buf.size)
+                socket.receive(responsePacket)
+
+                val respStr = String(responsePacket.data, 0, responsePacket.length)
+                val json = JSONObject(respStr)
+                if (json.optString("service") == "droidstream") {
+                    val port = json.optInt("port", 4747)
+                    val ips = json.optJSONArray("ips")
+                    val detectedIp = if (ips != null && ips.length() > 0) {
+                        ips.getString(0)
+                    } else {
+                        responsePacket.address.hostAddress
+                    }
+
+                    found = true
+                    runOnUiThread {
+                        binding.etHost.setText(detectedIp)
+                        binding.etPort.setText(port.toString())
+                        Toast.makeText(this, "PC detectada: $detectedIp", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (_: Exception) {
+                // Timeout or network error
+            } finally {
+                try {
+                    socket?.close()
+                } catch (_: Exception) {}
+                try {
+                    lock?.release()
+                } catch (_: Exception) {}
+
+                runOnUiThread {
+                    binding.btnDetectWifi.isEnabled = true
+                    binding.btnDetectWifi.text = "Detectar PC (Wi-Fi)"
+                    if (!found) {
+                        Toast.makeText(this, "No se detectó PC en la red Wi-Fi", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }.start()
     }
 
     override fun onDestroy() {

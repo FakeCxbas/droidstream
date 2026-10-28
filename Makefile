@@ -1,4 +1,4 @@
-.PHONY: all build-receiver test-receiver run-usb run-wifi setup-v4l2 clean build-apk install-apk
+.PHONY: all build-receiver test-receiver run-usb run-wifi run-gui setup-v4l2 clean build-apk install-apk
 
 all: build-receiver
 
@@ -11,13 +11,15 @@ test-receiver:
 	cd receiver && go test -v ./...
 
 run-usb: build-receiver
-	@echo "Configurando tunel ADB reverse e iniciando DroidStream en modo USB..."
+	@echo "Configurando tunel ADB reverse e iniciando DroidStream en modo USB con ventana interactiva..."
 	@adb forward --remove-all 2>/dev/null || true
-	./receiver/bin/droidstream -adb -dev /dev/video2
+	./receiver/bin/droidstream -adb -dev /dev/video2 -gui
 
 run-wifi: build-receiver
-	@echo "Iniciando DroidStream en modo Wi-Fi..."
-	./receiver/bin/droidstream -dev /dev/video2
+	@echo "Iniciando DroidStream en modo Wi-Fi con ventana interactiva..."
+	./receiver/bin/droidstream -dev /dev/video2 -gui
+
+run-gui: run-usb
 
 setup-v4l2:
 	@echo "Cargando modulo v4l2loopback para DroidStream..."
