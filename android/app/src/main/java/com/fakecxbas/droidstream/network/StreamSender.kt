@@ -37,21 +37,20 @@ class StreamSender(
             try {
                 val sock = Socket()
                 sock.tcpNoDelay = true
-                sock.sendBufferSize = 64 * 1024
+                sock.sendBufferSize = 256 * 1024
                 sock.connect(InetSocketAddress(host, port), 5000)
 
                 socket = sock
-                outputStream = BufferedOutputStream(sock.getOutputStream(), 64 * 1024)
+                val rawOut = sock.getOutputStream()
+                val bufferedOut = BufferedOutputStream(rawOut, 256 * 1024)
+                outputStream = bufferedOut
 
                 withContext(Dispatchers.Main) {
                     onStateChange(true, null)
                 }
 
                 while (isRunning.get() && !sock.isClosed) {
-                    val packet = frameQueue.poll() ?: run {
-                        delay(5)
-                        return@run null
-                    } ?: continue
+                    val packet = frameQueue.take()
 
                     val header = PacketProtocol.encodeHeader(
                         frameType = packet.frameType,

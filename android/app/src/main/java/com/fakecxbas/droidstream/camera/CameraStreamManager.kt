@@ -37,9 +37,14 @@ class CameraStreamManager(
 
     var targetWidth = 1280
     var targetHeight = 720
-    var jpegQuality = 80
+    var jpegQuality = 65
     var manualRotation = 0 // 0, 90, 180, 270
     var targetFps = 30 // 30 or 60
+
+    private val isProcessingFrame = java.util.concurrent.atomic.AtomicBoolean(false)
+    private var cachedNv21: ByteArray? = null
+    private var cachedRotatedNv21: ByteArray? = null
+    private val jpegOutputStream = ByteArrayOutputStream(256 * 1024)
 
     fun rotateNext(): Int {
         manualRotation = (manualRotation + 90) % 360
@@ -150,25 +155,45 @@ class CameraStreamManager(
     }
 
     private fun processImageProxy(image: ImageProxy) {
-        val sensorRotation = image.imageInfo.rotationDegrees
-        val totalRotation = (sensorRotation + manualRotation) % 360
+        if (!isProcessingFrame.compareAndSet(false, true)) {
+            // Drop frame if analyzer is still busy processing previous frame
+            image.close()
+            return
+        }
 
-        val rawNv21 = yuv420ToNv21(image)
-        val (finalNv21, finalSize) = rotateNV21(rawNv21, image.width, image.height, totalRotation)
+        try {
+            val sensorRotation = image.imageInfo.rotationDegrees
+            val totalRotation = (sensorRotation + manualRotation) % 360
 
-        val out = ByteArrayOutputStream()
-        val yuvImage = YuvImage(finalNv21, ImageFormat.NV21, finalSize.width, finalSize.height, null)
-        yuvImage.compressToJpeg(Rect(0, 0, finalSize.width, finalSize.height), jpegQuality, out)
-        val jpegBytes = out.toByteArray()
+            val rawNv21 = yuv420ToNv21(image)
+            val (finalNv21, finalSize) = rotateNV21(rawNv21, image.width, image.height, totalRotation)
 
-        onFrameReady(jpegBytes, finalSize.width, finalSize.height)
-        image.close()
+            val jpegBytes = synchronized(jpegOutputStream) {
+                jpegOutputStream.reset()
+                val yuvImage = YuvImage(finalNv21, ImageFormat.NV21, finalSize.width, finalSize.height, null)
+                yuvImage.compressToJpeg(Rect(0, 0, finalSize.width, finalSize.height), jpegQuality, jpegOutputStream)
+                jpegOutputStream.toByteArray()
+            }
+
+            onFrameReady(jpegBytes, finalSize.width, finalSize.height)
+        } catch (_: Exception) {
+        } finally {
+            image.close()
+            isProcessingFrame.set(false)
+        }
     }
 
     private fun rotateNV21(input: ByteArray, width: Int, height: Int, rotation: Int): Pair<ByteArray, Size> {
         if (rotation == 0) return Pair(input, Size(width, height))
         val ySize = width * height
-        val output = ByteArray(input.size)
+        val totalSize = input.size
+        val output = if (cachedRotatedNv21 != null && cachedRotatedNv21!!.size == totalSize) {
+            cachedRotatedNv21!!
+        } else {
+            val arr = ByteArray(totalSize)
+            cachedRotatedNv21 = arr
+            arr
+        }
 
         when (rotation) {
             90 -> {
@@ -231,7 +256,15 @@ class CameraStreamManager(
         val height = image.height
         val ySize = width * height
         val uvSize = width * height / 2
-        val nv21 = ByteArray(ySize + uvSize)
+        val requiredSize = ySize + uvSize
+
+        val nv21 = if (cachedNv21 != null && cachedNv21!!.size == requiredSize) {
+            cachedNv21!!
+        } else {
+            val arr = ByteArray(requiredSize)
+            cachedNv21 = arr
+            arr
+        }
 
         val yPlane = image.planes[0]
         val uPlane = image.planes[1]
